@@ -17,6 +17,7 @@ Customize chart appearance
 Automatically add charts to slides
 
 In config.json add mcp server
+```
  "google-slides": {
       "command": "python",
       "args": [
@@ -26,3 +27,4 @@ In config.json add mcp server
         "GOOGLE_TOKEN_PATH": "/path/to/token.json"
       }
     }
+```
