@@ -15,3 +15,14 @@ Create various chart types (bar, line, scatter, pie, etc.)
 Generate sample data for testing
 Customize chart appearance
 Automatically add charts to slides
+
+In config.json add mcp server
+ "google-slides": {
+      "command": "python",
+      "args": [
+        "/path/to/google-slides-server.py"
+      ],
+      "env": {
+        "GOOGLE_TOKEN_PATH": "/path/to/token.json"
+      }
+    }
