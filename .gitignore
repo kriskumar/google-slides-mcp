@@ -1,2 +1,4 @@
 *.json
 token.json
+.playwright-mcp/
+*.png
