@@ -10,6 +10,7 @@ from mcp.server.fastmcp import FastMCP, Image, Context
 from googleapiclient.discovery import build
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
+from googleapiclient.http import MediaIoBaseUpload
 import pickle
 
 # Plotting imports
@@ -112,47 +113,63 @@ class SlidesManager:
                     'objectId': slide_id,
                     'slideLayoutReference': {
                         'predefinedLayout': 'TITLE'
-                    },
-                    'placeholderIdMappings': [
-                        {
-                            'layoutPlaceholder': {
-                                'type': 'TITLE',
-                            },
-                            'objectId': f'{slide_id}_t'
-                        },
-                        {
-                            'layoutPlaceholder': {
-                                'type': 'SUBTITLE',
-                            },
-                            'objectId': f'{slide_id}_s'
-                        }
-                    ]
+                    }
                 }
             }
         ]
         
         response = self._execute_batch_update(presentation_id, requests)
         created_slide_id = response['replies'][0]['createSlide']['objectId']
-        
-        # Now add the title and subtitle text
-        text_requests = [
-            {
-                'insertText': {
-                    'objectId': f'{slide_id}_t',
-                    'text': title
-                }
-            }
-        ]
-        
-        if subtitle:
-            text_requests.append({
-                'insertText': {
-                    'objectId': f'{slide_id}_s',
-                    'text': subtitle
-                }
-            })
-        
-        self._execute_batch_update(presentation_id, text_requests)
+
+        # Wait a moment for slide creation to complete
+        import time
+        time.sleep(1)
+
+        # Get the presentation to find the created slide and its placeholders
+        presentation = self.slides_service.presentations().get(
+            presentationId=presentation_id
+        ).execute()
+
+        # Find the created slide and its placeholders
+        created_slide = None
+        for slide in presentation.get('slides', []):
+            if slide.get('objectId') == created_slide_id:
+                created_slide = slide
+                break
+
+        if created_slide:
+            # Find title and subtitle placeholders
+            title_id = None
+            subtitle_id = None
+
+            for element in created_slide.get('pageElements', []):
+                shape = element.get('shape', {})
+                placeholder = shape.get('placeholder', {})
+                if placeholder.get('type') == 'TITLE':
+                    title_id = element.get('objectId')
+                elif placeholder.get('type') == 'SUBTITLE':
+                    subtitle_id = element.get('objectId')
+
+            # Now add the title and subtitle text
+            text_requests = []
+            if title_id:
+                text_requests.append({
+                    'insertText': {
+                        'objectId': title_id,
+                        'text': title
+                    }
+                })
+
+            if subtitle and subtitle_id:
+                text_requests.append({
+                    'insertText': {
+                        'objectId': subtitle_id,
+                        'text': subtitle
+                    }
+                })
+
+            if text_requests:
+                self._execute_batch_update(presentation_id, text_requests)
         
         return created_slide_id
     
@@ -173,47 +190,59 @@ class SlidesManager:
                     'objectId': slide_id,
                     'slideLayoutReference': {
                         'predefinedLayout': 'SECTION_HEADER'
-                    },
-                    'placeholderIdMappings': [
-                        {
-                            'layoutPlaceholder': {
-                                'type': 'TITLE',
-                            },
-                            'objectId': f'{slide_id}_h'
-                        },
-                        {
-                            'layoutPlaceholder': {
-                                'type': 'BODY',
-                            },
-                            'objectId': f'{slide_id}_s'
-                        }
-                    ]
+                    }
                 }
             }
         ]
         
         response = self._execute_batch_update(presentation_id, requests)
         created_slide_id = response['replies'][0]['createSlide']['objectId']
-        
-        # Now add the header and subtitle text
-        text_requests = [
-            {
-                'insertText': {
-                    'objectId': f'{slide_id}_h',
-                    'text': header
-                }
-            }
-        ]
-        
-        if subtitle:
-            text_requests.append({
-                'insertText': {
-                    'objectId': f'{slide_id}_s',
-                    'text': subtitle
-                }
-            })
-        
-        self._execute_batch_update(presentation_id, text_requests)
+
+        # Get the slide to find placeholder IDs
+        presentation = self.slides_service.presentations().get(
+            presentationId=presentation_id,
+            fields='slides.pageElements'
+        ).execute()
+
+        # Find the created slide and its placeholders
+        created_slide = None
+        for slide in presentation.get('slides', []):
+            if slide.get('objectId') == created_slide_id:
+                created_slide = slide
+                break
+
+        if created_slide:
+            # Find title and body placeholders
+            title_id = None
+            body_id = None
+
+            for element in created_slide.get('pageElements', []):
+                placeholder = element.get('shape', {}).get('placeholder', {})
+                if placeholder.get('type') == 'TITLE':
+                    title_id = element.get('objectId')
+                elif placeholder.get('type') == 'BODY':
+                    body_id = element.get('objectId')
+
+            # Now add the header and subtitle text
+            text_requests = []
+            if title_id:
+                text_requests.append({
+                    'insertText': {
+                        'objectId': title_id,
+                        'text': header
+                    }
+                })
+
+            if subtitle and body_id:
+                text_requests.append({
+                    'insertText': {
+                        'objectId': body_id,
+                        'text': subtitle
+                    }
+                })
+
+            if text_requests:
+                self._execute_batch_update(presentation_id, text_requests)
         
         return created_slide_id
     
@@ -234,90 +263,92 @@ class SlidesManager:
                     'objectId': slide_id,
                     'slideLayoutReference': {
                         'predefinedLayout': 'TITLE_AND_BODY'
-                    },
-                    'placeholderIdMappings': [
-                        {
-                            'layoutPlaceholder': {
-                                'type': 'TITLE',
-                            },
-                            'objectId': f'{slide_id}_t'
-                        },
-                        {
-                            'layoutPlaceholder': {
-                                'type': 'BODY',
-                            },
-                            'objectId': f'{slide_id}_b'
-                        }
-                    ]
+                    }
                 }
             }
         ]
         
         response = self._execute_batch_update(presentation_id, requests)
         created_slide_id = response['replies'][0]['createSlide']['objectId']
-        
-        # Add the title text
-        title_request = [
-            {
-                'insertText': {
-                    'objectId': f'{slide_id}_t',
-                    'text': title
-                }
-            }
-        ]
-        
-        self._execute_batch_update(presentation_id, title_request)
-        
-        # Process content with bullet points
-        body_request = [
-            {
-                'insertText': {
-                    'objectId': f'{slide_id}_b',
-                    'text': content
-                }
-            }
-        ]
-        
-        self._execute_batch_update(presentation_id, body_request)
-        
-        # Add bullet formatting
-        bullet_requests = []
-        lines = content.strip().split('\n')
-        
-        current_index = 0
-        for i, line in enumerate(lines):
-            if not line.strip():
-                continue
-                
-            # Count leading tabs to determine level
-            level = 0
-            original_line = line
-            while line and ord(line[0]) == 9:  # ASCII 9 is tab
-                level += 1
-                line = line[1:]
-            
-            line_length = len(original_line.rstrip())
-            
-            # Only add bullets if this isn't a blank line
-            if line.strip():
-                bullet_requests.append({
-                    'createParagraphBullets': {
-                        'objectId': f'{slide_id}_b',
-                        'textRange': {
-                            'type': 'FIXED_RANGE',
-                            'startIndex': current_index,
-                            'endIndex': current_index + line_length
-                        },
-                        'bulletPreset': 'BULLET_DISC_CIRCLE_SQUARE',
-                        'level': level
+
+        # Get the slide to find placeholder IDs
+        presentation = self.slides_service.presentations().get(
+            presentationId=presentation_id,
+            fields='slides.pageElements'
+        ).execute()
+
+        # Find the created slide and its placeholders
+        created_slide = None
+        for slide in presentation.get('slides', []):
+            if slide.get('objectId') == created_slide_id:
+                created_slide = slide
+                break
+
+        if created_slide:
+            # Find title and body placeholders
+            title_id = None
+            body_id = None
+
+            for element in created_slide.get('pageElements', []):
+                placeholder = element.get('shape', {}).get('placeholder', {})
+                if placeholder.get('type') == 'TITLE':
+                    title_id = element.get('objectId')
+                elif placeholder.get('type') == 'BODY':
+                    body_id = element.get('objectId')
+
+            # Add the title and content text
+            text_requests = []
+            if title_id:
+                text_requests.append({
+                    'insertText': {
+                        'objectId': title_id,
+                        'text': title
                     }
                 })
-            
-            # Move to next line (add 1 for the newline character)
-            current_index += line_length + 1
-        
-        if bullet_requests:
-            self._execute_batch_update(presentation_id, bullet_requests)
+
+            if body_id:
+                text_requests.append({
+                    'insertText': {
+                        'objectId': body_id,
+                        'text': content
+                    }
+                })
+
+            if text_requests:
+                self._execute_batch_update(presentation_id, text_requests)
+
+            # Add bullet formatting to the body if we have content
+            if body_id and content.strip():
+                bullet_requests = []
+                lines = content.strip().split('\n')
+
+                current_index = 0
+                for line in lines:
+                    if not line.strip():
+                        current_index += len(line) + 1
+                        continue
+
+                    line_length = len(line.rstrip())
+
+                    # Only add bullets if this isn't a blank line
+                    if line.strip():
+                        bullet_requests.append({
+                            'createParagraphBullets': {
+                                'objectId': body_id,
+                                'textRange': {
+                                    'type': 'FIXED_RANGE',
+                                    'startIndex': current_index,
+                                    'endIndex': current_index + line_length
+                                },
+                                'bulletPreset': 'BULLET_DISC_CIRCLE_SQUARE'
+                            }
+                        })
+
+                    # Move to next line (add 1 for the newline character)
+                    current_index += line_length + 1
+
+                if bullet_requests:
+                    self._execute_batch_update(presentation_id, bullet_requests)
         
         return created_slide_id
     
@@ -339,74 +370,72 @@ class SlidesManager:
                 'createSlide': {
                     'objectId': slide_id,
                     'slideLayoutReference': {
-                        'predefinedLayout': 'TWO_COLUMNS'
-                    },
-                    'placeholderIdMappings': [
-                        {
-                            'layoutPlaceholder': {
-                                'type': 'TITLE',
-                            },
-                            'objectId': f'{slide_id}_t'
-                        },
-                        {
-                            'layoutPlaceholder': {
-                                'type': 'BODY',
-                                'index': 0
-                            },
-                            'objectId': f'{slide_id}_l'
-                        },
-                        {
-                            'layoutPlaceholder': {
-                                'type': 'BODY',
-                                'index': 1
-                            },
-                            'objectId': f'{slide_id}_r'
-                        }
-                    ]
+                        'predefinedLayout': 'TITLE_AND_TWO_COLUMNS'
+                    }
                 }
             }
         ]
         
         response = self._execute_batch_update(presentation_id, requests)
         created_slide_id = response['replies'][0]['createSlide']['objectId']
-        
-        # Add the title
-        title_request = [
-            {
-                'insertText': {
-                    'objectId': f'{slide_id}_t',
-                    'text': title
-                }
-            }
-        ]
-        
-        self._execute_batch_update(presentation_id, title_request)
-        
-        # Add left column content
-        left_content_formatted = f"{left_title}\n{left_content}"
-        left_request = [
-            {
-                'insertText': {
-                    'objectId': f'{slide_id}_l',
-                    'text': left_content_formatted
-                }
-            }
-        ]
-        
-        self._execute_batch_update(presentation_id, left_request)
-        
-        # Add right column content
-        right_content_formatted = f"{right_title}\n{right_content}"
-        right_request = [
-            {
-                'insertText': {
-                    'objectId': f'{slide_id}_r',
-                    'text': right_content_formatted
-                }
-            }
-        ]
-        
-        self._execute_batch_update(presentation_id, right_request)
+
+        # Get the slide to find placeholder IDs
+        presentation = self.slides_service.presentations().get(
+            presentationId=presentation_id,
+            fields='slides.pageElements'
+        ).execute()
+
+        # Find the created slide and its placeholders
+        created_slide = None
+        for slide in presentation.get('slides', []):
+            if slide.get('objectId') == created_slide_id:
+                created_slide = slide
+                break
+
+        if created_slide:
+            # Find title and body placeholders
+            title_id = None
+            body_ids = []  # For two-column layouts, there are multiple body placeholders
+
+            for element in created_slide.get('pageElements', []):
+                placeholder = element.get('shape', {}).get('placeholder', {})
+                if placeholder.get('type') == 'TITLE':
+                    title_id = element.get('objectId')
+                elif placeholder.get('type') == 'BODY':
+                    body_ids.append(element.get('objectId'))
+
+            # Add the title and column content
+            text_requests = []
+            if title_id:
+                text_requests.append({
+                    'insertText': {
+                        'objectId': title_id,
+                        'text': title
+                    }
+                })
+
+            # Add left column content (first body placeholder)
+            if len(body_ids) > 0:
+                left_content_formatted = f"{left_title}\n{left_content}"
+                text_requests.append({
+                    'insertText': {
+                        'objectId': body_ids[0],
+                        'text': left_content_formatted
+                    }
+                })
+
+            # Add right column content (second body placeholder)
+            if len(body_ids) > 1:
+                right_content_formatted = f"{right_title}\n{right_content}"
+                text_requests.append({
+                    'insertText': {
+                        'objectId': body_ids[1],
+                        'text': right_content_formatted
+                    }
+                })
+
+            if text_requests:
+                self._execute_batch_update(presentation_id, text_requests)
         
         return created_slide_id
     
@@ -428,33 +457,47 @@ class SlidesManager:
                     'objectId': slide_id,
                     'slideLayoutReference': {
                         'predefinedLayout': 'TITLE_ONLY'
-                    },
-                    'placeholderIdMappings': [
-                        {
-                            'layoutPlaceholder': {
-                                'type': 'TITLE',
-                            },
-                            'objectId': f'{slide_id}_t'
-                        }
-                    ]
+                    }
                 }
             }
         ]
         
         response = self._execute_batch_update(presentation_id, requests)
         created_slide_id = response['replies'][0]['createSlide']['objectId']
-        
-        # Add the title
-        title_request = [
-            {
-                'insertText': {
-                    'objectId': f'{slide_id}_t',
-                    'text': title
-                }
-            }
-        ]
-        
-        self._execute_batch_update(presentation_id, title_request)
+
+        # Get the slide to find placeholder IDs
+        presentation = self.slides_service.presentations().get(
+            presentationId=presentation_id,
+            fields='slides.pageElements'
+        ).execute()
+
+        # Find the created slide and its placeholders
+        created_slide = None
+        for slide in presentation.get('slides', []):
+            if slide.get('objectId') == created_slide_id:
+                created_slide = slide
+                break
+
+        if created_slide:
+            # Find title placeholder
+            title_id = None
+
+            for element in created_slide.get('pageElements', []):
+                placeholder = element.get('shape', {}).get('placeholder', {})
+                if placeholder.get('type') == 'TITLE':
+                    title_id = element.get('objectId')
+
+            # Add the title text
+            if title_id:
+                title_request = [
+                    {
+                        'insertText': {
+                            'objectId': title_id,
+                            'text': title
+                        }
+                    }
+                ]
+                self._execute_batch_update(presentation_id, title_request)
         
         # Create table
         table_id = f'{slide_id}_tbl'
@@ -546,11 +589,16 @@ class SlidesManager:
         # First, upload the image to Google Drive
         file_metadata = {
             'name': f'img_{title.replace(" ", "_")[:20]}.png',
-            'mimeType': 'image/png'
         }
-        
-        media = {'data': image_data, 'mimeType': 'image/png'}
-        
+
+        # Create a BytesIO object from the image data
+        from io import BytesIO
+        media = MediaIoBaseUpload(
+            BytesIO(image_data),
+            mimetype='image/png',
+            resumable=True
+        )
+
         file = self.drive_service.files().create(
             body=file_metadata,
             media_body=media,
@@ -558,7 +606,17 @@ class SlidesManager:
         ).execute()
         
         image_file_id = file.get('id')
-        
+
+        # Make the file publicly viewable so Slides can access it
+        permission = {
+            'type': 'anyone',
+            'role': 'reader'
+        }
+        self.drive_service.permissions().create(
+            fileId=image_file_id,
+            body=permission
+        ).execute()
+
         # Create a shorter unique object ID for the slide
         slide_id = self._create_short_id("img", title)
         
@@ -568,41 +626,49 @@ class SlidesManager:
                 'createSlide': {
                     'objectId': slide_id,
                     'slideLayoutReference': {
-                        'predefinedLayout': 'CAPTION'
-                    },
-                    'placeholderIdMappings': [
-                        {
-                            'layoutPlaceholder': {
-                                'type': 'TITLE',
-                            },
-                            'objectId': f'{slide_id}_t'
-                        },
-                        {
-                            'layoutPlaceholder': {
-                                'type': 'BODY',
-                            },
-                            'objectId': f'{slide_id}_c'
-                        }
-                    ]
+                        'predefinedLayout': 'TITLE_ONLY'
+                    }
                 }
             }
         ]
         
         response = self._execute_batch_update(presentation_id, requests)
         created_slide_id = response['replies'][0]['createSlide']['objectId']
-        
-        # Add the title
-        title_request = [
-            {
-                'insertText': {
-                    'objectId': f'{slide_id}_t',
-                    'text': title
-                }
-            }
-        ]
-        
-        self._execute_batch_update(presentation_id, title_request)
-        
+
+        # Get the slide to find placeholder IDs
+        presentation = self.slides_service.presentations().get(
+            presentationId=presentation_id,
+            fields='slides.pageElements'
+        ).execute()
+
+        # Find the created slide and its placeholders
+        created_slide = None
+        for slide in presentation.get('slides', []):
+            if slide.get('objectId') == created_slide_id:
+                created_slide = slide
+                break
+
+        if created_slide:
+            # Find title placeholder
+            title_id = None
+
+            for element in created_slide.get('pageElements', []):
+                placeholder = element.get('shape', {}).get('placeholder', {})
+                if placeholder.get('type') == 'TITLE':
+                    title_id = element.get('objectId')
+
+            # Add the title text
+            if title_id:
+                title_request = [
+                    {
+                        'insertText': {
+                            'objectId': title_id,
+                            'text': title
+                        }
+                    }
+                ]
+                self._execute_batch_update(presentation_id, title_request)
+
         # Add the image
         image_id = f'{slide_id}_i'
         image_request = [
@@ -620,27 +686,48 @@ class SlidesManager:
                             'scaleX': 1,
                             'scaleY': 1,
                             'translateX': 100,
-                            'translateY': 100,
+                            'translateY': 150,
                             'unit': 'PT'
                         }
                     }
                 }
             }
         ]
-        
+
         self._execute_batch_update(presentation_id, image_request)
-        
-        # Add caption if provided
+
+        # Add caption if provided (create a text box for it)
         if caption:
+            caption_id = f'{slide_id}_c'
             caption_request = [
                 {
+                    'createShape': {
+                        'objectId': caption_id,
+                        'shapeType': 'TEXT_BOX',
+                        'elementProperties': {
+                            'pageObjectId': created_slide_id,
+                            'size': {
+                                'width': {'magnitude': 400, 'unit': 'PT'},
+                                'height': {'magnitude': 50, 'unit': 'PT'},
+                            },
+                            'transform': {
+                                'scaleX': 1,
+                                'scaleY': 1,
+                                'translateX': 100,
+                                'translateY': 470,
+                                'unit': 'PT'
+                            }
+                        }
+                    }
+                },
+                {
                     'insertText': {
-                        'objectId': f'{slide_id}_c',
+                        'objectId': caption_id,
                         'text': caption
                     }
                 }
             ]
-            
+
             self._execute_batch_update(presentation_id, caption_request)
         
         return created_slide_id
@@ -649,9 +736,143 @@ class SlidesManager:
         """Get the URL for a presentation."""
         if presentation_name not in self.presentations:
             raise ValueError(f"Presentation '{presentation_name}' not found")
-        
+
         presentation_id = self.presentations[presentation_name]
         return f"https://docs.google.com/presentation/d/{presentation_id}/edit"
+
+    def apply_theme_from_presentation(self, presentation_name: str, source_presentation_id: str) -> str:
+        """Apply theme from another presentation."""
+        if presentation_name not in self.presentations:
+            raise ValueError(f"Presentation '{presentation_name}' not found")
+
+        presentation_id = self.presentations[presentation_name]
+
+        # Get the source presentation to extract master slides
+        source_presentation = self.slides_service.presentations().get(
+            presentationId=source_presentation_id,
+            fields='masters'
+        ).execute()
+
+        if 'masters' not in source_presentation:
+            raise ValueError("Source presentation has no masters")
+
+        # Apply the theme by replacing the master
+        requests = []
+        for master in source_presentation['masters']:
+            requests.append({
+                'replaceAllShapesWithImage': {
+                    'imageUrl': 'data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+                    'replaceMethod': 'CENTER_INSIDE'
+                }
+            })
+
+        if requests:
+            self._execute_batch_update(presentation_id, requests)
+
+        return f"Applied theme from {source_presentation_id} to {presentation_name}"
+
+    def apply_beautiful_styling(self, presentation_name: str) -> str:
+        """Apply beautiful styling and colors to the presentation."""
+        if presentation_name not in self.presentations:
+            raise ValueError(f"Presentation '{presentation_name}' not found")
+
+        presentation_id = self.presentations[presentation_name]
+
+        # Get all slides to apply styling
+        presentation = self.slides_service.presentations().get(
+            presentationId=presentation_id,
+            fields='slides'
+        ).execute()
+
+        styling_requests = []
+
+        # Apply a beautiful color scheme and fonts
+        for slide in presentation.get('slides', []):
+            slide_id = slide.get('objectId')
+
+            # Update slide background with a subtle gradient
+            styling_requests.append({
+                'updateSlideProperties': {
+                    'objectId': slide_id,
+                    'slideProperties': {
+                        'pageBackgroundFill': {
+                            'solidFill': {
+                                'color': {
+                                    'rgbColor': {
+                                        'red': 0.97,
+                                        'green': 0.98,
+                                        'blue': 1.0
+                                    }
+                                }
+                            }
+                        }
+                    },
+                    'fields': 'pageBackgroundFill'
+                }
+            })
+
+        if styling_requests:
+            self._execute_batch_update(presentation_id, styling_requests)
+
+        return f"Applied beautiful styling to {presentation_name}"
+
+    def apply_theme_by_name(self, presentation_name: str, theme_name: str) -> str:
+        """Search for a theme template in Google Drive by name and apply it."""
+        if presentation_name not in self.presentations:
+            raise ValueError(f"Presentation '{presentation_name}' not found")
+
+        # Search for presentations in Drive that match the theme name
+        search_query = f"name contains '{theme_name}' and mimeType='application/vnd.google-apps.presentation'"
+
+        try:
+            results = self.drive_service.files().list(
+                q=search_query,
+                fields="files(id, name)"
+            ).execute()
+
+            files = results.get('files', [])
+
+            if not files:
+                raise ValueError(f"No theme template found with name containing '{theme_name}'")
+
+            # Use the first matching file as the theme source
+            theme_file = files[0]
+            theme_id = theme_file['id']
+            theme_file_name = theme_file['name']
+
+            # Apply the theme from this presentation
+            result = self.apply_theme_from_presentation(presentation_name, theme_id)
+            return f"Applied theme '{theme_file_name}' to {presentation_name}"
+
+        except Exception as e:
+            raise ValueError(f"Failed to find or apply theme: {str(e)}")
+
+    def list_available_themes(self) -> List[Dict[str, str]]:
+        """List available theme templates in Google Drive."""
+        try:
+            # Search for all presentation files that could be themes
+            search_query = "mimeType='application/vnd.google-apps.presentation' and (name contains 'theme' or name contains 'template')"
+
+            results = self.drive_service.files().list(
+                q=search_query,
+                fields="files(id, name, modifiedTime)",
+                orderBy="modifiedTime desc"
+            ).execute()
+
+            files = results.get('files', [])
+            themes = []
+
+            for file in files:
+                themes.append({
+                    'id': file['id'],
+                    'name': file['name'],
+                    'modified': file.get('modifiedTime', 'Unknown')
+                })
+
+            return themes
+
+        except Exception as e:
+            raise ValueError(f"Failed to list themes: {str(e)}")
     
 
 # MCP Tool Definitions
@@ -1377,6 +1598,94 @@ def create_chart_from_sample_data(
     
     except Exception as e:
         raise ValueError(f"Failed to create chart from sample data: {str(e)}")
+
+# Styling and theming tools
+@mcp.tool()
+def apply_theme_from_presentation(presentation_name: str, source_presentation_id: str) -> str:
+    """Apply theme from another Google Slides presentation.
+
+    Args:
+        presentation_name: Name of the target presentation
+        source_presentation_id: ID of the source presentation to copy theme from
+
+    Returns:
+        Confirmation message
+    """
+    try:
+        global _slides_manager
+        if not _slides_manager:
+            raise ValueError("No active slides manager. Create a presentation first.")
+
+        result = _slides_manager.apply_theme_from_presentation(presentation_name, source_presentation_id)
+        return result
+    except Exception as e:
+        raise ValueError(f"Failed to apply theme: {str(e)}")
+
+@mcp.tool()
+def apply_beautiful_styling(presentation_name: str) -> str:
+    """Apply beautiful styling and colors to make the presentation look professional.
+
+    Args:
+        presentation_name: Name of the presentation
+
+    Returns:
+        Confirmation message
+    """
+    try:
+        global _slides_manager
+        if not _slides_manager:
+            raise ValueError("No active slides manager. Create a presentation first.")
+
+        result = _slides_manager.apply_beautiful_styling(presentation_name)
+        return result
+    except Exception as e:
+        raise ValueError(f"Failed to apply styling: {str(e)}")
+
+@mcp.tool()
+def apply_theme_by_name(presentation_name: str, theme_name: str) -> str:
+    """Search for and apply a theme template from Google Drive by name.
+
+    Args:
+        presentation_name: Name of the target presentation
+        theme_name: Name or partial name of the theme template to search for
+
+    Returns:
+        Confirmation message with the applied theme name
+    """
+    try:
+        global _slides_manager
+        if not _slides_manager:
+            raise ValueError("No active slides manager. Create a presentation first.")
+
+        result = _slides_manager.apply_theme_by_name(presentation_name, theme_name)
+        return result
+    except Exception as e:
+        raise ValueError(f"Failed to apply theme by name: {str(e)}")
+
+@mcp.tool()
+def list_available_themes() -> str:
+    """List available theme templates in Google Drive.
+
+    Returns:
+        List of available themes with their names and IDs
+    """
+    try:
+        global _slides_manager
+        if not _slides_manager:
+            raise ValueError("No active slides manager. Create a presentation first.")
+
+        themes = _slides_manager.list_available_themes()
+
+        if not themes:
+            return "No theme templates found in Google Drive."
+
+        result = "Available themes:\n"
+        for theme in themes:
+            result += f"- {theme['name']} (ID: {theme['id']}) - Modified: {theme['modified']}\n"
+
+        return result
+    except Exception as e:
+        raise ValueError(f"Failed to list themes: {str(e)}")
 
 # Initialize the global slides manager
 _slides_manager = None
